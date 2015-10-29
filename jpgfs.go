@@ -1,4 +1,3 @@
-// Hellofs implements a simple "hello world" file system.
 package main
 
 import (
@@ -7,14 +6,10 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
-	"strings"
-	"syscall"
 	"time"
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
-	_ "bazil.org/fuse/fs/fstestutil"
-	krfs "github.com/kr/fs"
 	"golang.org/x/net/context"
 )
 
@@ -48,35 +43,8 @@ func main() {
 	defer c.Close()
 
 	filesystem := FS{}
-
-	walker := krfs.Walk(source)
-	for walker.Step() {
-		if err := walker.Err(); err != nil {
-			continue
-		}
-
-		stat := walker.Stat()
-
-		if stat.IsDir() {
-			continue
-		}
-
-		fsstat := stat.Sys().(*syscall.Stat_t)
-
-		filesystem.tree.Add(
-			strings.TrimPrefix(walker.Path(), source),
-			File{
-				path:  walker.Path(),
-				size:  uint64(stat.Size()),
-				mode:  stat.Mode(),
-				Atime: time.Unix(fsstat.Atim.Sec, fsstat.Atim.Nsec),
-				Mtime: time.Unix(fsstat.Mtim.Sec, fsstat.Mtim.Nsec),
-				Ctime: time.Unix(fsstat.Ctim.Sec, fsstat.Ctim.Nsec),
-				Uid:   uint32(fsstat.Uid),
-				Gid:   uint32(fsstat.Gid),
-			},
-		)
-	}
+	walker := Walker{path: source}
+	walker.Walk(&filesystem.tree)
 
 	err = fs.Serve(c, filesystem)
 	if err != nil {
@@ -90,7 +58,6 @@ func main() {
 	}
 }
 
-// FS implements the hello world file system.
 type FS struct {
 	tree fs.Tree
 }
