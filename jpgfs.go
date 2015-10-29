@@ -30,6 +30,10 @@ func main() {
 	source := flag.Arg(0)
 	mountpoint := flag.Arg(1)
 
+	filesystem := FS{}
+	walker := Walker{Path: source, CachePath: "/home/chris/.cache/jpgfs/"}
+	walker.Walk(&filesystem.tree)
+
 	c, err := fuse.Mount(
 		mountpoint,
 		fuse.FSName(source),
@@ -41,10 +45,6 @@ func main() {
 		log.Fatal(err)
 	}
 	defer c.Close()
-
-	filesystem := FS{}
-	walker := Walker{path: source}
-	walker.Walk(&filesystem.tree)
 
 	err = fs.Serve(c, filesystem)
 	if err != nil {
