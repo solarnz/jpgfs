@@ -8,7 +8,9 @@ import (
 	"mime"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -20,9 +22,19 @@ import (
 type Walker struct {
 	Path      string
 	CachePath string
+
+	tree fusefs.Tree
+	lock sync.Mutex
 }
 
-func (w Walker) Walk(tree *fusefs.Tree) {
+func (w *Walker) Walk() fusefs.Tree {
+	wg := sync.WaitGroup{}
+
+	paths := make(chan string, runtime.NumCPU())
+	for i := 0; i < runtime.NumCPU(); i++ {
+		go worker(w, paths, &wg)
+	}
+
 	walker := fs.Walk(w.Path)
 	for walker.Step() {
 		if err := walker.Err(); err != nil {
@@ -33,42 +45,65 @@ func (w Walker) Walk(tree *fusefs.Tree) {
 			continue
 		}
 
-		stat := walker.Stat()
-		fsstat := stat.Sys().(*syscall.Stat_t)
-		path := walker.Path()
-		var size uint64
+		wg.Add(1)
+		paths <- walker.Path()
+	}
 
-		mimetype := mime.TypeByExtension(filepath.Ext(stat.Name()))
-		if mimetype == "image/jpeg" {
-			var err error
-			path, err = w.convert(path)
-			if err != nil {
-				fmt.Println(err)
-				continue
-			}
+	close(paths)
+	wg.Wait()
 
-			stat, err := os.Stat(path)
-			size = uint64(stat.Size())
-			if err != nil {
-				fmt.Println(err)
-				continue
-			}
+	return w.tree
+}
+
+func worker(w *Walker, paths <-chan string, wg *sync.WaitGroup) {
+	for path := range paths {
+		w.ProcessFile(path)
+		wg.Done()
+	}
+}
+
+func (w *Walker) ProcessFile(path string) error {
+	stat, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	fsstat := stat.Sys().(*syscall.Stat_t)
+	var size uint64
+	newPath := path
+
+	mimetype := mime.TypeByExtension(filepath.Ext(stat.Name()))
+	if mimetype == "image/jpeg" {
+		var err error
+		newPath, err = w.convert(path)
+		if err != nil {
+			return err
 		}
 
-		tree.Add(
-			strings.TrimPrefix(walker.Path(), w.Path),
-			File{
-				path:  path,
-				size:  size,
-				mode:  stat.Mode(),
-				Atime: time.Unix(fsstat.Atim.Sec, fsstat.Atim.Nsec),
-				Mtime: time.Unix(fsstat.Mtim.Sec, fsstat.Mtim.Nsec),
-				Ctime: time.Unix(fsstat.Ctim.Sec, fsstat.Ctim.Nsec),
-				Uid:   uint32(fsstat.Uid),
-				Gid:   uint32(fsstat.Gid),
-			},
-		)
+		stat, err := os.Stat(newPath)
+		size = uint64(stat.Size())
+		if err != nil {
+			return err
+		}
 	}
+
+	w.lock.Lock()
+	defer w.lock.Unlock()
+
+	w.tree.Add(
+		strings.TrimPrefix(path, w.Path),
+		File{
+			path:  newPath,
+			size:  size,
+			mode:  stat.Mode(),
+			Atime: time.Unix(fsstat.Atim.Sec, fsstat.Atim.Nsec),
+			Mtime: time.Unix(fsstat.Mtim.Sec, fsstat.Mtim.Nsec),
+			Ctime: time.Unix(fsstat.Ctim.Sec, fsstat.Ctim.Nsec),
+			Uid:   uint32(fsstat.Uid),
+			Gid:   uint32(fsstat.Gid),
+		},
+	)
+
+	return nil
 }
 
 func (w Walker) convert(path string) (string, error) {

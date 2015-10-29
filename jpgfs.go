@@ -32,7 +32,7 @@ func main() {
 
 	filesystem := FS{}
 	walker := Walker{Path: source, CachePath: "/home/chris/.cache/jpgfs/"}
-	walker.Walk(&filesystem.tree)
+	filesystem.tree = walker.Walk()
 
 	c, err := fuse.Mount(
 		mountpoint,
