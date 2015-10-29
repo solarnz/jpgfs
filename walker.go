@@ -83,7 +83,10 @@ func (w Walker) convert(path string) (string, error) {
 	hash.Write(b)
 
 	os.MkdirAll(w.CachePath, 0755)
-	outpath := w.CachePath + fmt.Sprintf("%x", hash.Sum(nil)) + ".jpg"
+	outpath := filepath.Join(
+		w.CachePath,
+		fmt.Sprintf("%x", hash.Sum(nil))+".jpg",
+	)
 
 	if _, err := os.Stat(outpath); err == nil {
 		return outpath, nil
